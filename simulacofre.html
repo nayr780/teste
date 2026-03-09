@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simulador CDB / Cofrinho</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+    h2, h3 { margin-top: 24px; }
+    .linha { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 12px; }
+    .campo { display: flex; flex-direction: column; gap: 4px; }
+    input, button { padding: 8px; font-size: 14px; }
+    button { cursor: pointer; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 20px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+    .lista-item { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding: 10px 0; gap: 12px; }
+    .lista-item:last-child { border-bottom: none; }
+    .item-texto { display: flex; flex-direction: column; gap: 2px; }
+    .muted { color: #666; font-size: 13px; }
+    #resumo { line-height: 1.8; margin-top: 10px; }
+    canvas { margin-top: 24px; max-width: 100%; }
+    .vazio { color: #777; font-style: italic; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:#f3f3f3; border:1px solid #e6e6e6; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+  <h2>Simulador CDB (estilo Cofrinho)</h2>
+
+  <div class="linha">
+    <div class="campo">
+      <label>CDI anual (%)</label>
+      <input type="number" id="cdi" value="13.15" step="0.01">
+    </div>
+
+    <div class="campo">
+      <label>% do CDI</label>
+      <input type="number" id="percentual" value="102" step="0.01">
+    </div>
+
+    <div class="campo">
+      <label>Data inicial do gráfico</label>
+      <input type="date" id="dataInicio">
+    </div>
+
+    <div class="campo">
+      <label>Data final da simulação</label>
+      <input type="date" id="dataFim">
+    </div>
+
+    <div class="campo">
+      <button onclick="calcular()">Recalcular</button>
+    </div>
+  </div>
+
+  <h3>Importar JSON</h3>
+  <div class="linha">
+    <div class="campo">
+      <label>Arquivo JSON</label>
+      <input type="file" id="jsonFile" accept=".json,application/json">
+    </div>
+
+    <div class="campo">
+      <button onclick="importarJSON()">Importar JSON</button>
+    </div>
+
+    <div class="campo">
+      <button onclick="limparEventos()">Limpar eventos</button>
+    </div>
+  </div>
+
+  <h3>Adicionar aplicação</h3>
+  <div class="linha">
+    <div class="campo">
+      <label>Data</label>
+      <input type="date" id="dataAplicacao">
+    </div>
+
+    <div class="campo">
+      <label>Valor</label>
+      <input type="number" id="valorAplicacao" step="0.01">
+    </div>
+
+    <div class="campo">
+      <button onclick="adicionarAplicacao()">Adicionar aplicação</button>
+    </div>
+  </div>
+
+  <h3>Adicionar resgate</h3>
+  <div class="linha">
+    <div class="campo">
+      <label>Data</label>
+      <input type="date" id="dataResgate">
+    </div>
+
+    <div class="campo">
+      <label>Valor</label>
+      <input type="number" id="valorResgate" step="0.01">
+    </div>
+
+    <div class="campo">
+      <button onclick="adicionarResgate()">Adicionar resgate</button>
+    </div>
+  </div>
+
+  <h3>Resumo</h3>
+  <div id="resumo" class="card"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Lista de aplicações</h3>
+      <div id="listaAplicacoes"></div>
+    </div>
+
+    <div class="card">
+      <h3>Lista de resgates</h3>
+      <div id="listaResgates"></div>
+    </div>
+  </div>
+
+  <canvas id="grafico"></canvas>
+
+  <script>
+    let aplicacoes = [];
+    let resgates = [];
+
+    // saldo inicial do JSON (base)
+    let saldoInicial = 0;
+    let dataSaldoInicial = null;
+
+    // última data do JSON (pra simular até lá por padrão)
+    let dataFinalImportada = null;
+
+    const iofTabela = [
+      96,93,90,86,83,80,76,73,70,66,
+      63,60,56,53,50,46,43,40,36,33,
+      30,26,23,20,16,13,10,6,3,0
+    ];
+
+    function formatarMoeda(valor) {
+      return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    function formatarDataISO(date) {
+      const ano = date.getFullYear();
+      const mes = String(date.getMonth() + 1).padStart(2, '0');
+      const dia = String(date.getDate()).padStart(2, '0');
+      return `${ano}-${mes}-${dia}`;
+    }
+
+    function parseLocalDate(str) {
+      const [ano, mes, dia] = str.split('-').map(Number);
+      return new Date(ano, mes - 1, dia);
+    }
+
+    function diferencaDias(data1, data2) {
+      const ms = 1000 * 60 * 60 * 24;
+      const utc1 = Date.UTC(data1.getFullYear(), data1.getMonth(), data1.getDate());
+      const utc2 = Date.UTC(data2.getFullYear(), data2.getMonth(), data2.getDate());
+      return Math.floor((utc2 - utc1) / ms);
+    }
+
+    function obterAliquotaIR(dias) {
+      if (dias <= 180) return 0.225;
+      if (dias <= 360) return 0.20;
+      if (dias <= 720) return 0.175;
+      return 0.15;
+    }
+
+    function cryptoRandom() {
+      return Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+
+    function normalizarLista(lista) {
+      if (!Array.isArray(lista)) return [];
+      return lista
+        .filter(item => item && item.data && Number(item.valor) > 0)
+        .map(item => ({
+          id: cryptoRandom(),
+          data: item.data,
+          valor: Number(item.valor)
+        }));
+    }
+
+    function obterDataMinimaMaxima() {
+      const datas = [];
+      if (dataSaldoInicial) datas.push(dataSaldoInicial);
+      for (const a of aplicacoes) datas.push(a.data);
+      for (const r of resgates) datas.push(r.data);
+      if (datas.length === 0) return { min: null, max: null };
+      const ordenadas = [...datas].sort();
+      return { min: ordenadas[0], max: ordenadas[ordenadas.length - 1] };
+    }
+
+    function inicializarDatas() {
+      const hoje = new Date();
+      const primeiroDiaAno = new Date(hoje.getFullYear(), 0, 1);
+
+      document.getElementById('dataInicio').value = formatarDataISO(primeiroDiaAno);
+      document.getElementById('dataFim').value = formatarDataISO(hoje);
+
+      document.getElementById('dataAplicacao').value = formatarDataISO(primeiroDiaAno);
+      document.getElementById('dataResgate').value = formatarDataISO(hoje);
+
+      document.getElementById('valorAplicacao').value = "1000";
+      document.getElementById('valorResgate').value = "";
+
+      // padrão: sem eventos
+      saldoInicial = 0;
+      dataSaldoInicial = formatarDataISO(primeiroDiaAno);
+      dataFinalImportada = null;
+
+      aplicacoes = [];
+      resgates = [];
+    }
+
+    function limparEventos() {
+      aplicacoes = [];
+      resgates = [];
+      saldoInicial = 0;
+      dataSaldoInicial = null;
+      dataFinalImportada = null;
+      renderizarListas();
+      calcular();
+    }
+
+    function importarJSON() {
+      const input = document.getElementById('jsonFile');
+      const arquivo = input.files[0];
+      if (!arquivo) { alert('Selecione um arquivo JSON.'); return; }
+
+      const leitor = new FileReader();
+      leitor.onload = function(event) {
+        try {
+          const json = JSON.parse(event.target.result);
+
+          saldoInicial = Number(json?.saldo_inicial?.valor || 0);
+          dataSaldoInicial = json?.saldo_inicial?.data || null;
+
+          aplicacoes = normalizarLista(json.aplicacoes);
+          resgates = normalizarLista(json.resgates);
+
+          ordenarEventos();
+          renderizarListas();
+
+          const { min, max } = obterDataMinimaMaxima();
+          if (min) document.getElementById('dataInicio').value = min;
+          if (max) {
+            dataFinalImportada = max;
+            document.getElementById('dataFim').value = max; // simula até o fim do extrato por padrão
+          } else {
+            dataFinalImportada = null;
+          }
+
+          // defaults úteis
+          if (min) document.getElementById('dataAplicacao').value = min;
+          if (max) document.getElementById('dataResgate').value = max;
+
+          calcular();
+          alert('JSON importado com sucesso.');
+        } catch (erro) {
+          console.error(erro);
+          alert('JSON inválido. Verifique a estrutura do arquivo.');
+        }
+      };
+
+      leitor.readAsText(arquivo, 'utf-8');
+    }
+
+    function adicionarAplicacao() {
+      const data = document.getElementById('dataAplicacao').value;
+      const valor = parseFloat(document.getElementById('valorAplicacao').value);
+      if (!data || !valor || valor <= 0) return;
+
+      aplicacoes.push({ id: cryptoRandom(), data, valor });
+      ordenarEventos();
+      renderizarListas();
+      calcular();
+    }
+
+    function adicionarResgate() {
+      const data = document.getElementById('dataResgate').value;
+      const valor = parseFloat(document.getElementById('valorResgate').value);
+      if (!data || !valor || valor <= 0) return;
+
+      resgates.push({ id: cryptoRandom(), data, valor });
+      ordenarEventos();
+      renderizarListas();
+      calcular();
+    }
+
+    function excluirAplicacao(id) {
+      aplicacoes = aplicacoes.filter(item => item.id !== id);
+      renderizarListas();
+      calcular();
+    }
+
+    function excluirResgate(id) {
+      resgates = resgates.filter(item => item.id !== id);
+      renderizarListas();
+      calcular();
+    }
+
+    function ordenarEventos() {
+      aplicacoes.sort((a, b) => a.data.localeCompare(b.data));
+      resgates.sort((a, b) => a.data.localeCompare(b.data));
+    }
+
+    function renderizarListas() {
+      const listaAplicacoes = document.getElementById('listaAplicacoes');
+      const listaResgates = document.getElementById('listaResgates');
+
+      if (aplicacoes.length === 0) {
+        listaAplicacoes.innerHTML = `<div class="vazio">Nenhuma aplicação cadastrada.</div>`;
+      } else {
+        listaAplicacoes.innerHTML = aplicacoes.map(item => `
+          <div class="lista-item">
+            <div class="item-texto">
+              <strong>${formatarMoeda(item.valor)}</strong>
+              <span class="muted">${parseLocalDate(item.data).toLocaleDateString('pt-BR')}</span>
+            </div>
+            <button onclick="excluirAplicacao('${item.id}')">Excluir</button>
+          </div>
+        `).join('');
+      }
+
+      if (resgates.length === 0) {
+        listaResgates.innerHTML = `<div class="vazio">Nenhum resgate cadastrado.</div>`;
+      } else {
+        listaResgates.innerHTML = resgates.map(item => `
+          <div class="lista-item">
+            <div class="item-texto">
+              <strong>${formatarMoeda(item.valor)}</strong>
+              <span class="muted">${parseLocalDate(item.data).toLocaleDateString('pt-BR')}</span>
+            </div>
+            <button onclick="excluirResgate('${item.id}')">Excluir</button>
+          </div>
+        `).join('');
+      }
+    }
+
+    function calcularTaxaDiaria() {
+      const cdiAnual = parseFloat(document.getElementById("cdi").value) / 100;
+      const percentual = parseFloat(document.getElementById("percentual").value) / 100;
+      const taxaAnual = cdiAnual * percentual;
+
+      // conversão diária composta (mais estável que taxaAnual/252)
+      return Math.pow(1 + taxaAnual, 1 / 252) - 1;
+    }
+
+    function dataFimSimulacao() {
+      const fimStr = document.getElementById('dataFim').value;
+      if (fimStr) return parseLocalDate(fimStr);
+
+      // fallback: se importou, usa a última data do JSON; senão usa hoje
+      if (dataFinalImportada) return parseLocalDate(dataFinalImportada);
+      return new Date();
+    }
+
+    function calcular() {
+      const taxaDiaria = calcularTaxaDiaria();
+
+      const inicioStr = document.getElementById('dataInicio').value;
+      const inicio = inicioStr ? parseLocalDate(inicioStr) : new Date(new Date().getFullYear(), 0, 1);
+
+      const fim = dataFimSimulacao();
+      const fimISO = formatarDataISO(fim);
+
+      const aplicacoesOrdenadas = [...aplicacoes].sort((a, b) => a.data.localeCompare(b.data));
+      const resgatesOrdenados = [...resgates].sort((a, b) => a.data.localeCompare(b.data));
+
+      let lotes = [];
+      let totalAplicado = 0;
+      let totalResgatadoBruto = 0;
+      let totalIOF = 0;
+      let totalIR = 0;
+      let rendimentoBrutoTotal = 0;
+
+      let labels = [];
+      let dadosSaldo = [];
+      let rendimentoDiaLista = [];
+      let rendimentoAcumuladoLista = [];
+
+      let idxAplicacao = 0;
+      let idxResgate = 0;
+
+      // adiciona saldo inicial como lote (se existir)
+      let saldoInicialUtilizado = 0;
+      if (saldoInicial > 0) {
+        const dataBase = dataSaldoInicial || inicioStr || formatarDataISO(inicio);
+        lotes.push({
+          id: "saldo-inicial",
+          dataAplicacao: dataBase,
+          principalInicial: saldoInicial,
+          saldoAtual: saldoInicial
+        });
+        saldoInicialUtilizado = saldoInicial;
+      }
+
+      // simula dia a dia até a data fim escolhida
+      for (let d = new Date(inicio); formatarDataISO(d) <= fimISO; d.setDate(d.getDate() + 1)) {
+        const dataAtualStr = formatarDataISO(d);
+
+        // aplica aportes do dia
+        while (idxAplicacao < aplicacoesOrdenadas.length && aplicacoesOrdenadas[idxAplicacao].data === dataAtualStr) {
+          const apl = aplicacoesOrdenadas[idxAplicacao];
+          lotes.push({
+            id: apl.id,
+            dataAplicacao: apl.data,
+            principalInicial: apl.valor,
+            saldoAtual: apl.valor
+          });
+          totalAplicado += apl.valor;
+          idxAplicacao++;
+        }
+
+        // rendimento do dia (dias úteis)
+        let rendimentoDiaTotal = 0;
+        const diaSemana = d.getDay(); // 0 dom, 6 sáb
+
+        if (diaSemana !== 0 && diaSemana !== 6) {
+          for (const lote of lotes) {
+            if (parseLocalDate(lote.dataAplicacao) > d) continue;
+            const rend = lote.saldoAtual * taxaDiaria;
+            lote.saldoAtual += rend;
+            rendimentoDiaTotal += rend;
+          }
+          rendimentoBrutoTotal += rendimentoDiaTotal;
+        }
+
+        // resgates do dia (FIFO por ordem de criação dos lotes)
+        while (idxResgate < resgatesOrdenados.length && resgatesOrdenados[idxResgate].data === dataAtualStr) {
+          let valorResgate = resgatesOrdenados[idxResgate].valor;
+          totalResgatadoBruto += valorResgate;
+
+          for (const lote of lotes) {
+            if (valorResgate <= 0) break;
+            if (parseLocalDate(lote.dataAplicacao) > d) continue;
+            if (lote.saldoAtual <= 0) continue;
+
+            const retirarDoLote = Math.min(valorResgate, lote.saldoAtual);
+
+            const proporcao = lote.saldoAtual > 0 ? retirarDoLote / lote.saldoAtual : 0;
+            const principalProporcional = lote.principalInicial * proporcao;
+
+            let rendimentoProporcional = retirarDoLote - principalProporcional;
+            if (rendimentoProporcional < 0) rendimentoProporcional = 0;
+
+            const diasCorridos = diferencaDias(parseLocalDate(lote.dataAplicacao), d);
+
+            // IOF (0-29) sobre rendimento
+            if (diasCorridos >= 0 && diasCorridos < 30 && rendimentoProporcional > 0) {
+              const aliquotaIOF = iofTabela[diasCorridos] / 100;
+              const iof = rendimentoProporcional * aliquotaIOF;
+              totalIOF += iof;
+              rendimentoProporcional -= iof;
+            }
+
+            // IR sobre rendimento (após IOF, como aproximação)
+            if (diasCorridos >= 0 && rendimentoProporcional > 0) {
+              const aliquotaIR = obterAliquotaIR(diasCorridos);
+              const ir = rendimentoProporcional * aliquotaIR;
+              totalIR += ir;
+            }
+
+            lote.saldoAtual -= retirarDoLote;
+            lote.principalInicial -= principalProporcional;
+            valorResgate -= retirarDoLote;
+          }
+
+          idxResgate++;
+        }
+
+        const saldoAtualDia = lotes
+          .filter(l => parseLocalDate(l.dataAplicacao) <= d)
+          .reduce((acc, l) => acc + l.saldoAtual, 0);
+
+        labels.push(d.toLocaleDateString('pt-BR'));
+        dadosSaldo.push(saldoAtualDia);
+        rendimentoDiaLista.push(rendimentoDiaTotal);
+        rendimentoAcumuladoLista.push(rendimentoBrutoTotal);
+      }
+
+      const saldoAtual = lotes.reduce((acc, lote) => acc + lote.saldoAtual, 0);
+
+      const diffBruta = (saldoInicialUtilizado + totalAplicado - totalResgatadoBruto + rendimentoBrutoTotal) - saldoAtual;
+      // diffBruta deveria ser ~0 (só pra debug)
+      const badgeFim = document.getElementById('dataFim').value
+        ? `<span class="badge">até ${parseLocalDate(document.getElementById('dataFim').value).toLocaleDateString('pt-BR')}</span>`
+        : `<span class="badge">até ${parseLocalDate(fimISO).toLocaleDateString('pt-BR')}</span>`;
+
+      document.getElementById("resumo").innerHTML = `
+        <div><strong>Saldo inicial importado:</strong> ${formatarMoeda(saldoInicialUtilizado)} ${dataSaldoInicial ? `<span class="muted">(${parseLocalDate(dataSaldoInicial).toLocaleDateString('pt-BR')})</span>` : ''}</div>
+        <div><strong>Saldo atual:</strong> ${formatarMoeda(saldoAtual)} ${badgeFim}</div>
+        <div><strong>Total aplicado:</strong> ${formatarMoeda(totalAplicado)}</div>
+        <div><strong>Total resgatado:</strong> ${formatarMoeda(totalResgatadoBruto)}</div>
+        <div><strong>Rendimento bruto total (simulado):</strong> ${formatarMoeda(rendimentoBrutoTotal)}</div>
+        <div><strong>IOF total (estimado):</strong> ${formatarMoeda(totalIOF)}</div>
+        <div><strong>IR total (estimado):</strong> ${formatarMoeda(totalIR)}</div>
+        <div><strong>Saldo líquido estimado após IOF/IR nos resgates:</strong> ${formatarMoeda(saldoAtual - totalIOF - totalIR)}</div>
+        <div class="muted" style="margin-top:8px;">
+          Obs.: CDI varia e a plataforma pode usar regras/arreondamentos próprios. Aqui é uma simulação aproximada.
+        </div>
+      `;
+
+      if (window.meuGrafico) window.meuGrafico.destroy();
+
+      const ctx = document.getElementById('grafico').getContext('2d');
+      window.meuGrafico = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Saldo',
+            data: dadosSaldo,
+            tension: 0.15
+          }]
+        },
+        options: {
+          responsive: true,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const i = context.dataIndex;
+                  return [
+                    `Saldo: ${formatarMoeda(dadosSaldo[i])}`,
+                    `Rendimento acumulado: ${formatarMoeda(rendimentoAcumuladoLista[i])}`,
+                    `Rendimento do dia: ${formatarMoeda(rendimentoDiaLista[i])}`
+                  ];
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              ticks: { callback: v => formatarMoeda(v) }
+            }
+          }
+        }
+      });
+    }
+
+    // init
+    inicializarDatas();
+    ordenarEventos();
+    renderizarListas();
+    calcular();
+  </script>
+</body>
+</html>
