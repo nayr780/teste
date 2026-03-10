@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Editor de Java Online</title>
+    <!-- Carregar CSS do CodeMirror via CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+    <!-- Tema opcional do CodeMirror -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/eclipse.min.css">
+    <!-- Carregar JavaScript do CodeMirror via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
+    <!-- Modo Java para CodeMirror -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/clike/clike.min.js"></script>
+    <!-- Adicionar suporte a linhas de número -->
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #editor {
+            height: 400px;
+            border: 1px solid #ccc;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            white-space: pre-wrap;
+            min-height: 100px;
+        }
+        #save-button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Editor de Java Online</h1>
+    <div id="editor">// Escreva seu código Java aqui
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Olá, Mundo!");
+    }
+}</div>
+    <button id="save-button">Salvar Código</button>
+    <h2>Código Salvo:</h2>
+    <div id="output"></div>
+
+    <script>
+        // Inicializar CodeMirror
+        var editor = CodeMirror(document.getElementById('editor'), {
+            mode: 'text/x-java',
+            theme: 'eclipse',
+            lineNumbers: true,
+            value: `// Escreva seu código Java aqui
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Olá, Mundo!");
+    }
+}`
+        });
+
+        // Função para salvar o código no navegador usando LocalStorage
+        document.getElementById('save-button').addEventListener('click', function() {
+            var code = editor.getValue();
+            localStorage.setItem('savedJavaCode', code);
+            document.getElementById('output').innerText = 'Código salvo com sucesso!';
+        });
+
+        // Carregar código salvo ao iniciar
+        window.onload = function() {
+            var savedCode = localStorage.getItem('savedJavaCode');
+            if (savedCode) {
+                editor.setValue(savedCode);
+                document.getElementById('output').innerText = 'Código salvo carregado.';
+            }
+        };
+    </script>
+</body>
+</html>
