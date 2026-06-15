@@ -1,3 +1,0 @@
-Comando executado com sucesso.
-
-Os arquivos `resposta.txt` e `resultado.txt` foram removidos da nuvem.
