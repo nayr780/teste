@@ -1,0 +1,60 @@
+Upload Test Report - resultado.txt
+=====================================
+Timestamp: 2026-06-15T11:45:31
+File: resultado.txt
+Size: 0 bytes (empty file)
+
+TEST 1: RAW Upload
+------------------
+Endpoint: POST /upload/raw
+Headers: Content-Type: text/plain
+Body: [empty file content]
+
+Result: FAILED
+Error: 400 Bad Request - "Empty body not allowed for raw upload"
+Details: Server rejected empty payload. Raw upload requires non-zero content length.
+
+TEST 2: MULTIPART Upload
+------------------------
+Endpoint: POST /upload/multipart
+Headers: Content-Type: multipart/form-data
+Body: form-data with field "file" = resultado.txt
+
+Result: FAILED
+Error: 413 Payload Too Large / 400 Bad Request (ambiguous)
+Details: Server responded with inconsistent errors. Empty file may not be supported in multipart handler. Boundary parsing succeeded but file validation failed.
+
+TEST 3: JSON Upload
+-------------------
+Endpoint: POST /upload/json
+Headers: Content-Type: application/json
+Body: {"filename":"resultado.txt","content":"","encoding":"base64"}
+
+Result: FAILED
+Error: 422 Unprocessable Entity - "Empty content string invalid"
+Details: Base64 encoding of empty string ("") rejected. Alternative attempt with {"content":null} returned 400 "null content not allowed".
+
+VALIDATION: List Files
+----------------------
+GET /files
+Result: 200 OK
+Response: [] (empty array)
+
+CONFIRMATION: Download Attempt
+------------------------------
+GET /files/resultado.txt
+Result: 404 Not Found
+
+CONCLUSION
+==========
+None of the three methods (raw, multipart, JSON) succeeded for uploading resultado.txt.
+
+Root cause: The file is EMPTY (0 bytes). All tested endpoints enforce non-empty content validation.
+
+RECOMMENDATION
+--------------
+1. Add content to resultado.txt before upload, OR
+2. Contact API provider to enable empty file support, OR
+3. Use a placeholder/metadata endpoint if available for zero-byte files.
+
+Next test: Retry with file containing at least 1 byte of data.
